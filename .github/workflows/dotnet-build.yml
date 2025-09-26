@@ -1,0 +1,74 @@
+name: .NET Build Pipeline with Outdated Actions
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # Using outdated checkout action (v2 instead of v4)
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+    
+    # Using outdated setup-dotnet action (v1 instead of v4)
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 9.0.x
+        
+    # Using outdated cache action (v2 instead of v4)
+    - name: Cache NuGet packages
+      uses: actions/cache@v2
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    - name: Build
+      run: dotnet build --no-restore --configuration Release
+      
+    # Using outdated upload-artifact action (v2 instead of v4)
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: build-artifacts
+        path: |
+          **/bin/Release/**
+          !**/bin/Release/**/ref/**
+          !**/bin/Release/**/*.pdb
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    # Using outdated checkout action (v2)
+    - uses: actions/checkout@v2
+    
+    # Using outdated setup-dotnet action (v1)
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 9.0.x
+    
+    - name: Publish
+      run: dotnet publish --configuration Release --output ./publish
+      
+    # Using outdated upload-artifact action (v2)
+    - name: Upload published app
+      uses: actions/upload-artifact@v2
+      with:
+        name: published-app
+        path: ./publish/
