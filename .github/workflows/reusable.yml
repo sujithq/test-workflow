@@ -1,37 +1,59 @@
-name: Reusable Workflow
+name: Reusable Dependabot Keep-Alive
 
 on:
   workflow_call:
     inputs:
-      environment:
-        description: "Target environment (dev, test, prod)"
-        required: true
-        type: string
-      run-tests:
-        description: "Whether to run tests"
+      runs-on:
+        description: 'Runner labels as JSON array'
         required: false
-        default: true
-        type: boolean
+        type: string
+        default: '["ubuntu-latest"]'
+      team-handle:
+        description: 'Optional team mention'
+        required: false
+        type: string
+        default: '@sujithq-org/dependency-maintainers'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  keepalive:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Show input parameters
+      - name: Find an open Dependabot PR
+        id: find
+        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
         run: |
-          echo "Environment: ${{ inputs.environment }}"
-          echo "Run tests: ${{ inputs.run-tests }}"
+          set -euo pipefail
+          pr_number=$(gh pr list --author dependabot[bot] --state open --json number -q '.[0].number' || true)
+          if [ -n "${pr_number:-}" ]; then
+            echo "pr=$pr_number" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Run build
-        run: echo "Building for ${{ inputs.environment }}"
+      - name: Nudge via comment
+        if: steps.find.outputs.pr != ''
+        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        run: |
+          gh pr comment "${{ steps.find.outputs.pr }}" --body "@dependabot rebase"
 
-  test:
-    if: ${{ inputs.run-tests }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Run tests
-        run: echo "Running tests for ${{ inputs.environment }}"
+      - name: Fallback: reminder issue
+        if: steps.find.outputs.pr == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TEAM_HANDLE: ${{ inputs['team-handle'] }}
+        run: |
+          mention="${TEAM_HANDLE}"
+          body="$mention
+
+          No open Dependabot PRs found.
+
+          Action: Press **Insights → Dependency graph → Dependabot → Recent update jobs → Check for updates** in the UI."
+          existing=$(gh issue list --search "Dependabot keep-alive in:title" --json number -q '.[0].number' || true)
+          if [ -n "${existing:-}" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "Dependabot keep-alive" --body "$body" --label "dependencies"
+          fi
