@@ -26,7 +26,10 @@ env:
 
 jobs:
   scan:
-    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.runner != '' ? inputs.runner : '["ubuntu-latest"]') }}
+    strategy:
+      matrix:
+        runner: ${{ fromJSON( github.event_name == 'workflow_dispatch' && inputs.runner || '["ubuntu-latest"]' ) }}
+    runs-on: ${{ matrix.runner }}
     env:
       GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
     steps:
@@ -51,8 +54,7 @@ jobs:
             last_wf=$(gh api -q '.workflow_runs[]?|select(.name=="Dependabot Updates")|.updated_at' "/repos/$full/actions/runs?per_page=100" | sort -r | head -n1 || true)
             latest="${last_pr_update:-$last_wf}"
             if [ -z "$latest" ]; then
-              warn_list+="$full — no Dependabot activity found
-"
+              warn_list+="$full — no Dependabot activity found"
               continue
             fi
             latest_s=$(date -u -d "$latest" +%s 2>/dev/null || echo 0)
@@ -60,7 +62,6 @@ jobs:
             if [ "$latest_s" -eq 0 ] || [ "$age" -ge "$cutoff" ]; then
               days=$(( age / 86400 ))
               warn_list+="$full — last activity: $latest (${days}d ago)
-"
             fi
           done <<< "$repos"
           {
@@ -70,7 +71,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Dry-run: job summary
+      - name: Dry-run - job summary
         if: ${{ github.event_name == 'workflow_dispatch' && inputs['dry-run'] }}
         run: |
           echo "### Dependabot inactivity report (≥${CUTOFF_DAYS} days) — ${TEAM_HANDLE}" >> $GITHUB_STEP_SUMMARY
@@ -93,7 +94,7 @@ jobs:
             The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
 
             \`\`\`
-${{ steps.scan.outputs.warn_list }}
+            ${{ steps.scan.outputs.warn_list }}
             \`\`\`"
             existing=$(gh issue list --search "$title in:title" --json number -q '.[0].number' || true)
             if [ -n "${existing:-}" ]; then
