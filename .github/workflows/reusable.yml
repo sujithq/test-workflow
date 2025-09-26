@@ -43,8 +43,8 @@ jobs:
       - name: Nudge via comment
         if: steps.find.outputs.pr != ''
         env:
-          # GH_TOKEN: ${{ secrets.DEPENDABOT_PAT }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.DEPENDABOT_PAT }}
+          # GH_TOKEN: ${{ steps.app-token.outputs.token }}
         shell: bash
         run: |
           gh pr comment -R "$GITHUB_REPOSITORY" "${{ steps.find.outputs.pr }}" --body "@dependabot rebase"
