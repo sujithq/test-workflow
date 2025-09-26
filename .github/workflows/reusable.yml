@@ -25,25 +25,30 @@ jobs:
     steps:
       - name: Find an open Dependabot PR
         id: find
-        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          set -euo pipefail
-          pr_number=$(gh pr list --author dependabot[bot] --state open --json number -q '.[0].number' || true)
+          set -eo pipefail
+          pr_number="$(gh pr list --author "dependabot[bot]" --state open --json number -q '.[0].number' || true)"
           if [ -n "${pr_number:-}" ]; then
-            echo "pr=$pr_number" >> "$GITHUB_OUTPUT"
+            echo "pr=${pr_number}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Nudge via comment
         if: steps.find.outputs.pr != ''
-        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
           gh pr comment "${{ steps.find.outputs.pr }}" --body "@dependabot rebase"
 
-      - name: Fallback: reminder issue
+      - name: Fallback - reminder issue
         if: steps.find.outputs.pr == ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEAM_HANDLE: ${{ inputs['team-handle'] }}
+        shell: bash
         run: |
           mention="${TEAM_HANDLE}"
           body="$mention
@@ -51,7 +56,8 @@ jobs:
           No open Dependabot PRs found.
 
           Action: Press **Insights → Dependency graph → Dependabot → Recent update jobs → Check for updates** in the UI."
-          existing=$(gh issue list --search "Dependabot keep-alive in:title" --json number -q '.[0].number' || true)
+
+          existing="$(gh issue list --search "Dependabot keep-alive in:title" --json number -q '.[0].number' || true)"
           if [ -n "${existing:-}" ]; then
             gh issue comment "$existing" --body "$body"
           else
