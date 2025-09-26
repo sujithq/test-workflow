@@ -12,7 +12,7 @@ on:
 
 jobs:
   call:
-    uses: ./.github/workflows/reusable.yml@main
+    uses: ./.github/workflows/reusable.yml
     with:
       runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'selfhosted'
         && '["self-hosted","dependabot"]' || '["ubuntu-latest"]' }}
