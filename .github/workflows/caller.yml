@@ -19,7 +19,7 @@ permissions:
 jobs:
   call:
     uses: ./.github/workflows/reusable.yml
-    # secrets: inherit
+    secrets: inherit
     with:
       runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'selfhosted'
         && '["self-hosted","dependabot"]' || '["ubuntu-latest"]' }}
