@@ -1,0 +1,37 @@
+name: Reusable Workflow
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Target environment (dev, test, prod)"
+        required: true
+        type: string
+      run-tests:
+        description: "Whether to run tests"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show input parameters
+        run: |
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Run tests: ${{ inputs.run-tests }}"
+
+      - name: Run build
+        run: echo "Building for ${{ inputs.environment }}"
+
+  test:
+    if: ${{ inputs.run-tests == 'true' }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Run tests
+        run: echo "Running tests for ${{ inputs.environment }}"
