@@ -26,20 +26,20 @@ env:
 
 jobs:
   scan:
-    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.runner || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.runner != '' ? inputs.runner : '["ubuntu-latest"]') }}
     env:
       GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
     steps:
       - name: Scan org repos for inactivity
         id: scan
+        shell: bash
         run: |
           set -euo pipefail
           repos=$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=1")
           page=2
           while page_repos=$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=$page"); do
             [ -z "$page_repos" ] && break
-            repos="$repos"$'
-'"$page_repos"
+            repos="$repos"$'\n'"$page_repos"
             page=$((page+1))
           done
           now=$(date -u +%s)
@@ -63,35 +63,34 @@ jobs:
 "
             fi
           done <<< "$repos"
-          echo "warn_list<<EOF" >> "$GITHUB_OUTPUT"
-          printf "%s" "$warn_list" >> "$GITHUB_OUTPUT"
-          echo >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo "warn_list<<EOF"
+            printf "%s" "$warn_list"
+            echo
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Dry-run: job summary
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs['dry-run'] }}
         run: |
           echo "### Dependabot inactivity report (≥${CUTOFF_DAYS} days) — ${TEAM_HANDLE}" >> $GITHUB_STEP_SUMMARY
           if [ -z "${{ steps.scan.outputs.warn_list }}" ]; then
             echo "No repos nearing the threshold 🎉" >> $GITHUB_STEP_SUMMARY
           else
-            echo -e "The following repos may pause soon:
-
-\`\`\`
-${{ steps.scan.outputs.warn_list }}
-\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo -e "The following repos may pause soon:\n\n\`\`\`\n${{ steps.scan.outputs.warn_list }}\n\`\`\`" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Post issue (real mode)
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry-run) }}
-        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs['dry-run']) }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "${{ steps.scan.outputs.warn_list }}" ]; then
             title="Dependabot inactivity report (≥${CUTOFF_DAYS} days) — ${TEAM_HANDLE}"
             mention="${TEAM_HANDLE}"
             body="$mention
 
-            The following repositories are nearing the 90-day Dependabot pause threshold:
+            The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
 
             \`\`\`
 ${{ steps.scan.outputs.warn_list }}
