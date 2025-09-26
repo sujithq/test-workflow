@@ -43,7 +43,7 @@ jobs:
         run: |
           gh pr comment -R "$GITHUB_REPOSITORY" "${{ steps.find.outputs.pr }}" --body "@dependabot rebase"
 
-      - name: Fallback: reminder issue
+      - name: Fallback - reminder issue
         if: steps.find.outputs.pr == ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
