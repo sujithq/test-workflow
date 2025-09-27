@@ -20,7 +20,7 @@ permissions:
   issues: write
 
 env:
-  ORG: sujithq-org
+  ORG: sujithq
   TEAM_HANDLE: "@sujithq-org/dependency-maintainers"
   CUTOFF_DAYS: "75"
 
