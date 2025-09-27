@@ -20,7 +20,7 @@ permissions:
   issues: write
 
 env:
-  ORG: sujithq
+  ORG: sujithq-org
   TEAM_HANDLE: "@sujithq-org/dependency-maintainers"
   CUTOFF_DAYS: "75"
 
@@ -33,17 +33,49 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
     steps:
-      - name: Scan org repos for inactivity
+      - name: Scan org repos for inactivity (resilient)
         id: scan
         shell: bash
+        env:
+          # Set to "true" to log which endpoints 404 and keep going
+          DEBUG_404: "false"
         run: |
           set -euo pipefail
 
+          fail_404() {
+            local what="$1" full="$2" rc="$3"
+            if [[ "${DEBUG_404}" == "true" ]]; then
+              echo "::warning title=404::${what} returned 404 for ${full} (rc=${rc}). Skipping." >&2
+            fi
+          }
+
+          json_or_empty() {
+            # usage: json_or_empty "desc" "org/repo" cmd...
+            local desc="$1"; shift
+            local full="$1"; shift
+            local out rc=0
+            if ! out="$("$@" 2>/dev/null)"; then
+              rc=$?
+              # For Actions, probe with HEAD to confirm 404/access issues
+              if [[ "$desc" == "actions runs list" ]]; then
+                if ! gh api --method HEAD "/repos/${full}/actions/runs?per_page=1" >/dev/null 2>&1; then
+                  fail_404 "$desc" "$full" "$rc"
+                  echo ""
+                  return 0
+                fi
+              fi
+              fail_404 "$desc" "$full" "$rc"
+              echo ""
+              return 0
+            fi
+            printf "%s" "$out"
+          }
+
           # Collect all non-archived repos (paginated)
-          repos="$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=1")"
+          repos="$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=1" || true)"
           page=2
-          while page_repos="$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=$page")"; do
-            [ -z "$page_repos" ] && break
+          while page_repos="$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=$page" || true)"; do
+            [[ -z "$page_repos" ]] && break
             repos="$repos"$'\n'"$page_repos"
             page=$((page+1))
           done
@@ -53,18 +85,25 @@ jobs:
           warn_list=""
 
           while IFS= read -r repo; do
-            [ -z "$repo" ] && continue
+            [[ -z "$repo" ]] && continue
             full="$ORG/$repo"
 
             # Latest Dependabot PR activity (any state)
-            last_pr_update="$(gh pr list -R "$full" --author dependabot[bot] --state all --json updatedAt -q '.[].updatedAt' | sort -r | head -n1 || true)"
+            last_pr_update="$(
+              json_or_empty "dependabot pr list" "$full" \
+                gh pr list -R "$full" --author dependabot[bot] --state all --json updatedAt -q '.[].updatedAt'
+            )"
 
             # Latest workflow run of a workflow named "Dependabot Updates"
-            last_wf="$(gh api -q '.workflow_runs[]?|select(.name=="Dependabot Updates")|.updated_at' "/repos/$full/actions/runs?per_page=100" | sort -r | head -n1 || true)"
+            wf_runs="$(
+              json_or_empty "actions runs list" "$full" \
+                gh api -q '.workflow_runs[]?|select(.name=="Dependabot Updates")|.updated_at' "/repos/$full/actions/runs?per_page=100"
+            )"
 
-            latest="${last_pr_update:-$last_wf}"
+            # Combine the timestamps we found and pick the newest
+            latest="$(printf "%s\n%s\n" "$last_pr_update" "$wf_runs" | grep -E '.+' | sort -r | head -n1 || true)"
 
-            if [ -z "$latest" ]; then
+            if [[ -z "$latest" ]]; then
               warn_list+="$full - no Dependabot activity found"$'\n'
               continue
             fi
@@ -72,7 +111,7 @@ jobs:
             latest_s="$(date -u -d "$latest" +%s 2>/dev/null || echo 0)"
             age=$(( now - latest_s ))
 
-            if [ "$latest_s" -eq 0 ] || [ "$age" -ge "$cutoff" ]; then
+            if [[ "$latest_s" -eq 0 || "$age" -ge "$cutoff" ]]; then
               days=$(( age / 86400 ))
               warn_list+="$full - last activity: $latest (${days}d ago)"$'\n'
             fi
@@ -110,22 +149,18 @@ jobs:
         run: |
           if [ -n "${{ steps.scan.outputs.warn_list }}" ]; then
             title="Dependabot inactivity report (≥${CUTOFF_DAYS} days) — ${TEAM_HANDLE}"
-            mention="${TEAM_HANDLE}"
 
-            # Build body with a heredoc to avoid escaping headaches
-            body="$(
-              cat <<'MARKDOWN'
-            MARKDOWN
-            )"
-            body="${mention}
+            body="$(cat <<EOF
+${TEAM_HANDLE}
 
-            The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
+The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
 
-            \`\`\`
-            ${{ steps.scan.outputs.warn_list }}
-            \`\`\`"
-
-            # Find existing by exact title; if found, comment; else, create
+\`\`\`
+${{ steps.scan.outputs.warn_list }}
+\`\`\`
+EOF
+)"
+            # Look for an existing issue with the exact title
             existing="$(gh issue list --search "$title in:title" --json number,title -q '.[] | select(.title=="'"$title"'") | .number' | head -n1 || true)"
 
             if [ -n "${existing:-}" ]; then
