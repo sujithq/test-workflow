@@ -28,7 +28,7 @@ jobs:
   scan:
     strategy:
       matrix:
-        runner: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.runner || '["ubuntu-latest"]') }}
+        runner: ${{ fromJson(github.event_name == 'workflow_dispatch' ? inputs.runner : '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.runner }}
     env:
       GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
@@ -125,7 +125,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Dry-run - job summary
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs['dry-run'] }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs['dry-run'] == true }}
         shell: bash
         run: |
           {
@@ -142,7 +142,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post issue (real mode)
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs['dry-run']) }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs['dry-run'] != true }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -150,22 +150,19 @@ jobs:
           if [ -n "${{ steps.scan.outputs.warn_list }}" ]; then
             title="Dependabot inactivity report (≥${CUTOFF_DAYS} days) — ${TEAM_HANDLE}"
 
-            body="$(cat <<EOF
+            # Build the issue body safely into $body
+            read -r -d '' body <<'EOF' || true
 ${TEAM_HANDLE}
 
 The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
-
-\`\`\`
-${{ steps.scan.outputs.warn_list }}
-\`\`\`
 EOF
-)"
-            # Look for an existing issue with the exact title
-            existing="$(gh issue list --search "$title in:title" --json number,title -q '.[] | select(.title=="'"$title"'") | .number' | head -n1 || true)"
+
+            # Look for an existing issue with the exact title in the current repo
+            existing="$(gh issue list -R "$GITHUB_REPOSITORY" --search "$title in:title" --json number,title -q '.[] | select(.title=="'"$title"'") | .number' | head -n1 || true)"
 
             if [ -n "${existing:-}" ]; then
-              gh issue comment "$existing" --body "$body"
+              gh issue comment -R "$GITHUB_REPOSITORY" "$existing" --body "$body"
             else
-              gh issue create --title "$title" --body "$body" --label "dependencies"
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label "dependencies"
             fi
           fi
