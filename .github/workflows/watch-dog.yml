@@ -28,7 +28,7 @@ jobs:
   scan:
     strategy:
       matrix:
-        runner: ${{ fromJSON( github.event_name == 'workflow_dispatch' && inputs.runner || '["ubuntu-latest"]' ) }}
+        runner: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.runner || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.runner }}
     env:
       GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
@@ -38,34 +38,48 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          repos=$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=1")
+
+          # Collect all non-archived repos (paginated)
+          repos="$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=1")"
           page=2
-          while page_repos=$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=$page"); do
+          while page_repos="$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=$page")"; do
             [ -z "$page_repos" ] && break
             repos="$repos"$'\n'"$page_repos"
             page=$((page+1))
           done
-          now=$(date -u +%s)
+
+          now="$(date -u +%s)"
           cutoff=$(( CUTOFF_DAYS * 86400 ))
           warn_list=""
+
           while IFS= read -r repo; do
+            [ -z "$repo" ] && continue
             full="$ORG/$repo"
-            last_pr_update=$(gh pr list -R "$full" --author dependabot[bot] --state all --json updatedAt -q '.[].updatedAt' | sort -r | head -n1 || true)
-            last_wf=$(gh api -q '.workflow_runs[]?|select(.name=="Dependabot Updates")|.updated_at' "/repos/$full/actions/runs?per_page=100" | sort -r | head -n1 || true)
+
+            # Latest Dependabot PR activity (any state)
+            last_pr_update="$(gh pr list -R "$full" --author dependabot[bot] --state all --json updatedAt -q '.[].updatedAt' | sort -r | head -n1 || true)"
+
+            # Latest workflow run of a workflow named "Dependabot Updates"
+            last_wf="$(gh api -q '.workflow_runs[]?|select(.name=="Dependabot Updates")|.updated_at' "/repos/$full/actions/runs?per_page=100" | sort -r | head -n1 || true)"
+
             latest="${last_pr_update:-$last_wf}"
+
             if [ -z "$latest" ]; then
-              warn_list+="$full — no Dependabot activity found"
+              warn_list+="$full - no Dependabot activity found"$'\n'
               continue
             fi
-            latest_s=$(date -u -d "$latest" +%s 2>/dev/null || echo 0)
+
+            latest_s="$(date -u -d "$latest" +%s 2>/dev/null || echo 0)"
             age=$(( now - latest_s ))
+
             if [ "$latest_s" -eq 0 ] || [ "$age" -ge "$cutoff" ]; then
               days=$(( age / 86400 ))
-              warn_list+="$full — last activity: $latest (${days}d ago)
+              warn_list+="$full - last activity: $latest (${days}d ago)"$'\n'
             fi
           done <<< "$repos"
+
           {
-            echo "warn_list<<EOF"
+            echo "warn_list<<'EOF'"
             printf "%s" "$warn_list"
             echo
             echo "EOF"
@@ -73,30 +87,47 @@ jobs:
 
       - name: Dry-run - job summary
         if: ${{ github.event_name == 'workflow_dispatch' && inputs['dry-run'] }}
+        shell: bash
         run: |
-          echo "### Dependabot inactivity report (≥${CUTOFF_DAYS} days) — ${TEAM_HANDLE}" >> $GITHUB_STEP_SUMMARY
-          if [ -z "${{ steps.scan.outputs.warn_list }}" ]; then
-            echo "No repos nearing the threshold 🎉" >> $GITHUB_STEP_SUMMARY
-          else
-            echo -e "The following repos may pause soon:\n\n\`\`\`\n${{ steps.scan.outputs.warn_list }}\n\`\`\`" >> $GITHUB_STEP_SUMMARY
-          fi
+          {
+            printf "### Dependabot inactivity report (≥%s days) — %s\n\n" "$CUTOFF_DAYS" "$TEAM_HANDLE"
+            if [ -z "${{ steps.scan.outputs.warn_list }}" ]; then
+              echo "No repos nearing the threshold 🎉"
+            else
+              echo "The following repos may pause soon:"
+              echo
+              echo '```'
+              printf "%s\n" "${{ steps.scan.outputs.warn_list }}"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post issue (real mode)
         if: ${{ !(github.event_name == 'workflow_dispatch' && inputs['dry-run']) }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
           if [ -n "${{ steps.scan.outputs.warn_list }}" ]; then
             title="Dependabot inactivity report (≥${CUTOFF_DAYS} days) — ${TEAM_HANDLE}"
             mention="${TEAM_HANDLE}"
-            body="$mention
+
+            # Build body with a heredoc to avoid escaping headaches
+            body="$(
+              cat <<'MARKDOWN'
+            MARKDOWN
+            )"
+            body="${mention}
 
             The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
 
             \`\`\`
             ${{ steps.scan.outputs.warn_list }}
             \`\`\`"
-            existing=$(gh issue list --search "$title in:title" --json number -q '.[0].number' || true)
+
+            # Find existing by exact title; if found, comment; else, create
+            existing="$(gh issue list --search "$title in:title" --json number,title -q '.[] | select(.title=="'"$title"'") | .number' | head -n1 || true)"
+
             if [ -n "${existing:-}" ]; then
               gh issue comment "$existing" --body "$body"
             else
