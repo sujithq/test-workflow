@@ -28,7 +28,7 @@ jobs:
   scan:
     strategy:
       matrix:
-        runner: ${{ fromJson(github.event_name == 'workflow_dispatch' ? inputs.runner : '["ubuntu-latest"]') }}
+        runner: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.runner || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.runner }}
     env:
       GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
@@ -37,8 +37,7 @@ jobs:
         id: scan
         shell: bash
         env:
-          # Set to "true" to log which endpoints 404 and keep going
-          DEBUG_404: "false"
+          DEBUG_404: "false" # flip to "true" to debug 404s
         run: |
           set -euo pipefail
 
@@ -100,7 +99,6 @@ jobs:
                 gh api -q '.workflow_runs[]?|select(.name=="Dependabot Updates")|.updated_at' "/repos/$full/actions/runs?per_page=100"
             )"
 
-            # Combine the timestamps we found and pick the newest
             latest="$(printf "%s\n%s\n" "$last_pr_update" "$wf_runs" | grep -E '.+' | sort -r | head -n1 || true)"
 
             if [[ -z "$latest" ]]; then
@@ -151,10 +149,13 @@ jobs:
             title="Dependabot inactivity report (≥${CUTOFF_DAYS} days) — ${TEAM_HANDLE}"
 
             # Build the issue body safely into $body
-            read -r -d '' body <<'EOF' || true
+            read -r -d '' body <<EOF || true
 ${TEAM_HANDLE}
 
 The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
+
+${{ steps.scan.outputs.warn_list }}
+
 EOF
 
             # Look for an existing issue with the exact title in the current repo
