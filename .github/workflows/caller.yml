@@ -10,11 +10,14 @@ on:
         required: false
         default: 'hosted'
         
-# 👇 this is critical
+# 👇 this is critical for org-wide operations
 permissions:
   contents: read
   pull-requests: write
   issues: write
+  # Note: For org-wide scanning, ensure ORG_READ_TOKEN secret has:
+  # - repo (full control of private repositories)
+  # - OR public_repo (access to public repositories only)
 
 jobs:
   call:

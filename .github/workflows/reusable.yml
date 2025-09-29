@@ -46,7 +46,7 @@ jobs:
       - name: Discover repositories
         id: discover
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ inputs.scan-mode == 'org' && secrets.ORG_READ_TOKEN || secrets.GITHUB_TOKEN }}
           SCAN_MODE: ${{ inputs.scan-mode }}
           ORG: ${{ inputs.org || github.repository_owner }}
           REPO_INCLUDES: ${{ inputs.repo-includes }}
@@ -130,7 +130,7 @@ jobs:
 
       - name: Process repositories
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ inputs.scan-mode == 'org' && secrets.ORG_READ_TOKEN || secrets.GITHUB_TOKEN }}
           REPOS: ${{ steps.discover.outputs.repos }}
         shell: bash
         run: |
