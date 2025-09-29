@@ -26,7 +26,15 @@ on:
       team-handle:
         description: 'team handle to mention in the issue'
         required: false
-        default: '@sujithq-org/dependency-maintainers'        
+        default: '@sujithq-org/dependency-maintainers'
+      repo-includes:
+        description: 'Comma-separated list of repo name patterns to include (supports wildcards like repo*, *suffix, *partial*)'
+        required: false
+        default: ''
+      repo-excludes:
+        description: 'Comma-separated list of repo name patterns to exclude (supports wildcards like repo*, *suffix, *partial*)'
+        required: false
+        default: ''
 permissions:
   contents: read
   issues: write
@@ -35,6 +43,8 @@ env:
   ORG: ${{ github.event_name == 'workflow_dispatch' && inputs.org || 'sujithq' }}
   TEAM_HANDLE: ${{ github.event_name == 'workflow_dispatch' && inputs['team-handle'] || '@sujithq-org/dependency-maintainers' }}
   CUTOFF_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs['cutoff-days'] || 75 }}
+  REPO_INCLUDES: ${{ github.event_name == 'workflow_dispatch' && inputs['repo-includes'] || '' }}
+  REPO_EXCLUDES: ${{ github.event_name == 'workflow_dispatch' && inputs['repo-excludes'] || '' }}
 
 jobs:
   scan:
