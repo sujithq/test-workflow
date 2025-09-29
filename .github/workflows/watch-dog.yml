@@ -53,6 +53,21 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Debug: Show filter configuration
+          echo "🔍 Scanning organization: $ORG (Dependabot-enabled repos only)"
+          echo "⏰ Cutoff days: $CUTOFF_DAYS"
+          if [[ -n "$REPO_INCLUDES" ]]; then
+            echo "✅ Including repos matching: $REPO_INCLUDES"
+          else
+            echo "✅ Including: all Dependabot-enabled repos"
+          fi
+          if [[ -n "$REPO_EXCLUDES" ]]; then
+            echo "❌ Excluding repos matching: $REPO_EXCLUDES"
+          else
+            echo "❌ Excluding: none"
+          fi
+          echo ""
+
           fail_404() {
             local what="$1" full="$2" rc="$3"
             if [[ "${DEBUG_404}" == "true" ]]; then
@@ -82,14 +97,63 @@ jobs:
             printf "%s" "$out"
           }
 
-          # Collect all non-archived repos (paginated)
-          repos="$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=1" || true)"
-          page=2
-          while page_repos="$(gh api -q '.[] | select(.archived==false) | .name' "/orgs/$ORG/repos?per_page=100&type=all&page=$page" || true)"; do
-            [[ -z "$page_repos" ]] && break
-            repos="$repos"$'\n'"$page_repos"
-            page=$((page+1))
-          done
+          # Function to check if repo matches include/exclude patterns
+          matches_pattern() {
+            local repo="$1"
+            local patterns="$2"
+            
+            [[ -z "$patterns" ]] && return 0
+            
+            IFS=',' read -ra PATTERN_ARRAY <<< "$patterns"
+            for pattern in "${PATTERN_ARRAY[@]}"; do
+              pattern=$(echo "$pattern" | xargs)  # trim whitespace
+              [[ -z "$pattern" ]] && continue
+              
+              # Convert shell wildcards to bash pattern matching
+              if [[ "$repo" == $pattern ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          should_include_repo() {
+            local repo="$1"
+            
+            # If includes list is specified, repo must match at least one include pattern
+            if [[ -n "$REPO_INCLUDES" ]]; then
+              if ! matches_pattern "$repo" "$REPO_INCLUDES"; then
+                return 1
+              fi
+            fi
+            
+            # If excludes list is specified, repo must not match any exclude pattern
+            if [[ -n "$REPO_EXCLUDES" ]]; then
+              if matches_pattern "$repo" "$REPO_EXCLUDES"; then
+                return 1
+              fi
+            fi
+            
+            return 0
+          }
+
+          # Find repos with Dependabot configuration using search API
+          echo "🔍 Searching for repositories with Dependabot configuration..."
+          
+          # Use GitHub search API to find repos with dependabot.yml files
+          search_query="org:${ORG}+path:.github+filename:dependabot.yml"
+          repos_with_dependabot="$(gh api "search/code?q=${search_query}" --jq '.items[].repository.full_name' | sort -u || true)"
+          
+          if [[ -z "$repos_with_dependabot" ]]; then
+            echo "⚠️  No repositories found with Dependabot configuration"
+            exit 0
+          fi
+          
+          # Extract just the repo names (remove org prefix)
+          repos="$(echo "$repos_with_dependabot" | sed "s|^${ORG}/||" || true)"
+          
+          repo_count=$(echo "$repos" | grep -c . || echo "0")
+          echo "📊 Found $repo_count repositories with Dependabot configuration"
 
           now="$(date -u +%s)"
           cutoff=$(( CUTOFF_DAYS * 86400 ))
@@ -97,6 +161,13 @@ jobs:
 
           while IFS= read -r repo; do
             [[ -z "$repo" ]] && continue
+            
+            # Apply filters
+            if ! should_include_repo "$repo"; then
+              echo "⏭️  Skipping $repo (filtered out)"
+              continue
+            fi
+            
             full="$ORG/$repo"
 
             # Latest Dependabot PR activity (any state)
