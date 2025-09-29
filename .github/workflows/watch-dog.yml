@@ -116,9 +116,8 @@ jobs:
           done <<< "$repos"
 
           {
-            echo "warn_list<<'EOF'"
+            echo "warn_list<<EOF"
             printf "%s" "$warn_list"
-            echo
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -148,16 +147,12 @@ jobs:
           if [ -n "${{ steps.scan.outputs.warn_list }}" ]; then
             title="Dependabot inactivity report (≥${CUTOFF_DAYS} days) — ${TEAM_HANDLE}"
 
-            # Build the issue body safely into $body
-            read -r -d '' body <<EOF || true
-            
-            ${TEAM_HANDLE}
+            # Build the issue body
+            body="${TEAM_HANDLE}
 
-            The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
+          The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
 
-            ${{ steps.scan.outputs.warn_list }}
-
-            EOF
+          ${{ steps.scan.outputs.warn_list }}"
 
             # Look for an existing issue with the exact title in the current repo
             existing="$(gh issue list -R "$GITHUB_REPOSITORY" --search "$title in:title" --json number,title -q '.[] | select(.title=="'"$title"'") | .number' | head -n1 || true)"
