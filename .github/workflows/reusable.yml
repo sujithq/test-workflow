@@ -165,7 +165,14 @@ jobs:
               if [ -n "${existing:-}" ]; then
                 gh issue comment -R "$repo" "$existing" --body "$body" || echo "  ⚠️ Failed to comment on issue"
               else
-                gh issue create -R "$repo" --title "Dependabot keep-alive" --body "$body" --label "dependencies" || echo "  ⚠️ Failed to create issue"
+                # Check if 'dependencies' label exists
+                label_exists="$(gh api repos/$repo/labels/dependencies --silent 2>/dev/null && echo "true" || echo "false")"
+                if [ "$label_exists" = "true" ]; then
+                  gh issue create -R "$repo" --title "Dependabot keep-alive" --body "$body" --label "dependencies" || echo "  ⚠️ Failed to create issue"
+                else
+                  echo "  ℹ️ 'dependencies' label not found, creating issue without label"
+                  gh issue create -R "$repo" --title "Dependabot keep-alive" --body "$body" || echo "  ⚠️ Failed to create issue"
+                fi
               fi
               ((total_issues++))
             fi
