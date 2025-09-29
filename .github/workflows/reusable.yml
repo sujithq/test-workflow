@@ -13,6 +13,26 @@ on:
         required: false
         type: string
         default: '@sujithq-org/dependency-maintainers'
+      org:
+        description: 'Organization to scan (if different from current repo owner)'
+        required: false
+        type: string
+        default: ''
+      scan-mode:
+        description: 'Mode: "single" (current repo only) or "org" (all org repos with dependabot)'
+        required: false
+        type: string
+        default: 'single'
+      repo-includes:
+        description: 'Comma-separated repo patterns to include (org mode only)'
+        required: false
+        type: string
+        default: ''
+      repo-excludes:
+        description: 'Comma-separated repo patterns to exclude (org mode only)'  
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -23,48 +43,133 @@ jobs:
   keepalive:
     runs-on: ${{ fromJSON(inputs.runs-on) }}
     steps:
-      - name: Find an open Dependabot PR
-        id: find
+      - name: Discover repositories
+        id: discover
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCAN_MODE: ${{ inputs.scan-mode }}
+          ORG: ${{ inputs.org || github.repository_owner }}
+          REPO_INCLUDES: ${{ inputs.repo-includes }}
+          REPO_EXCLUDES: ${{ inputs.repo-excludes }}
         shell: bash
         run: |
           set -eo pipefail
-          pr_number="$(gh pr list -R "$GITHUB_REPOSITORY" --author "dependabot[bot]" --state open --json number -q '.[0].number' || true)"
-          if [ -n "${pr_number:-}" ]; then
-            echo "pr=${pr_number}" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Generate app token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-      - name: Nudge via comment
-        if: steps.find.outputs.pr != ''
-        env:
-          GH_TOKEN: ${{ secrets.DEPENDABOT_PAT }}
-          # GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        shell: bash
-        run: |
-          gh pr comment -R "$GITHUB_REPOSITORY" "${{ steps.find.outputs.pr }}" --body "@dependabot rebase"
+          
+          # Function to check if repo matches include/exclude patterns
+          matches_pattern() {
+            local repo="$1"
+            local patterns="$2"
+            
+            [[ -z "$patterns" ]] && return 0
+            
+            IFS=',' read -ra PATTERN_ARRAY <<< "$patterns"
+            for pattern in "${PATTERN_ARRAY[@]}"; do
+              pattern=$(echo "$pattern" | xargs)  # trim whitespace
+              [[ -z "$pattern" ]] && continue
+              
+              if [[ "$repo" == $pattern ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
 
-      - name: Fallback - reminder issue
-        if: steps.find.outputs.pr == ''
+          should_include_repo() {
+            local repo="$1"
+            
+            # If includes list is specified, repo must match at least one include pattern
+            if [[ -n "$REPO_INCLUDES" ]]; then
+              if ! matches_pattern "$repo" "$REPO_INCLUDES"; then
+                return 1
+              fi
+            fi
+            
+            # If excludes list is specified, repo must not match any exclude pattern
+            if [[ -n "$REPO_EXCLUDES" ]]; then
+              if matches_pattern "$repo" "$REPO_EXCLUDES"; then
+                return 1
+              fi
+            fi
+            
+            return 0
+          }
+          
+          if [[ "$SCAN_MODE" == "single" ]]; then
+            echo "🎯 Single repository mode: $GITHUB_REPOSITORY"
+            echo "repos=$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"
+          else
+            echo "🔍 Organization mode: Scanning $ORG for Dependabot-enabled repositories"
+            
+            # Use GitHub search API to find repos with dependabot.yml files
+            search_query="org:${ORG}+path:.github+filename:dependabot.yml"
+            repos_with_dependabot="$(gh api "search/code?q=${search_query}" --jq '.items[].repository.full_name' | sort -u || true)"
+            
+            if [[ -z "$repos_with_dependabot" ]]; then
+              echo "⚠️ No repositories found with Dependabot configuration"
+              echo "repos=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            
+            # Apply filters
+            filtered_repos=""
+            while IFS= read -r full_repo; do
+              [[ -z "$full_repo" ]] && continue
+              repo_name="${full_repo#*/}"  # Extract repo name after org/
+              
+              if should_include_repo "$repo_name"; then
+                filtered_repos+="$full_repo "
+              else
+                echo "⏭️ Skipping $full_repo (filtered out)"
+              fi
+            done <<< "$repos_with_dependabot"
+            
+            repo_count=$(echo "$filtered_repos" | wc -w)
+            echo "📊 Found $repo_count repositories to process"
+            echo "repos=$filtered_repos" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Process repositories
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TEAM_HANDLE: ${{ inputs['team-handle'] }}
+          REPOS: ${{ steps.discover.outputs.repos }}
         shell: bash
         run: |
-          mention="${TEAM_HANDLE}"
-          body="$mention
+          set -eo pipefail
+          
+          [[ -z "$REPOS" ]] && { echo "No repositories to process"; exit 0; }
+          
+          total_prs=0
+          total_issues=0
+          
+          for repo in $REPOS; do
+            echo "🔄 Processing $repo"
+            
+            # Find open Dependabot PR
+            pr_number="$(gh pr list -R "$repo" --author "dependabot[bot]" --state open --json number -q '.[0].number' || true)"
+            
+            if [ -n "${pr_number:-}" ]; then
+              echo "  📌 Found PR #$pr_number - nudging with rebase"
+              gh pr comment -R "$repo" "$pr_number" --body "@dependabot rebase" || echo "  ⚠️ Failed to comment on PR"
+              ((total_prs++))
+            else
+              echo "  📝 No open PRs - creating reminder issue"
+              
+              mention="${{ inputs.team-handle }}"
+              body="$mention
 
-          No open Dependabot PRs found.
+          No open Dependabot PRs found in $repo.
 
           Action: Press **Insights → Dependency graph → Dependabot → Recent update jobs → Check for updates** in the UI."
-          existing="$(gh issue list -R "$GITHUB_REPOSITORY" --search "Dependabot keep-alive in:title" --json number -q '.[0].number' || true)"
-          if [ -n "${existing:-}" ]; then
-            gh issue comment -R "$GITHUB_REPOSITORY" "$existing" --body "$body"
-          else
-            gh issue create -R "$GITHUB_REPOSITORY" --title "Dependabot keep-alive" --body "$body" --label "dependencies"
-          fi
+              
+              existing="$(gh issue list -R "$repo" --search "Dependabot keep-alive in:title" --json number -q '.[0].number' || true)"
+              if [ -n "${existing:-}" ]; then
+                gh issue comment -R "$repo" "$existing" --body "$body" || echo "  ⚠️ Failed to comment on issue"
+              else
+                gh issue create -R "$repo" --title "Dependabot keep-alive" --body "$body" --label "dependencies" || echo "  ⚠️ Failed to create issue"
+              fi
+              ((total_issues++))
+            fi
+          done
+          
+          echo "📊 Summary: Nudged $total_prs PRs, created/updated $total_issues issues"
+
