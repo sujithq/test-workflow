@@ -22,5 +22,7 @@ jobs:
     secrets: inherit
     with:
       runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'selfhosted'
-        && '["self-hosted","dependabot"]' || '["ubuntu-latest"]' }}
+        && '["self-hosted","dependabot"]' || '["ubuntu-latest"]'  }}
       team-handle: "@sujithq-org/dependency-maintainers"
+      scan-mode: 'org'  # Use organization mode to scan all repos with dependabot
+      org: 'sujithq'    # Specify the organization to scan
