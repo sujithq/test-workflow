@@ -168,10 +168,20 @@ jobs:
                 # Check if 'dependencies' label exists
                 label_exists="$(gh api repos/$repo/labels/dependencies --silent 2>/dev/null && echo "true" || echo "false")"
                 if [ "$label_exists" = "true" ]; then
-                  gh issue create -R "$repo" --title "Dependabot keep-alive" --body "$body" --label "dependencies" || echo "  ⚠️ Failed to create issue"
+                  if issue_url=$(gh issue create -R "$repo" --title "Dependabot keep-alive" --body "$body" --label "dependencies" 2>&1); then
+                    echo "$issue_url"
+                  else
+                    echo "  ⚠️ Failed to create issue with label: $issue_url"
+                    # Try without label as fallback
+                    gh issue create -R "$repo" --title "Dependabot keep-alive" --body "$body" || echo "  ⚠️ Failed to create issue without label"
+                  fi
                 else
                   echo "  ℹ️ 'dependencies' label not found, creating issue without label"
-                  gh issue create -R "$repo" --title "Dependabot keep-alive" --body "$body" || echo "  ⚠️ Failed to create issue"
+                  if issue_url=$(gh issue create -R "$repo" --title "Dependabot keep-alive" --body "$body" 2>&1); then
+                    echo "$issue_url"
+                  else
+                    echo "  ⚠️ Failed to create issue: $issue_url"
+                  fi
                 fi
               fi
               ((total_issues++))
