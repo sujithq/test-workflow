@@ -32,9 +32,9 @@ permissions:
   issues: write
 
 env:
-  ORG: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.org || 'sujithq') }}
-  TEAM_HANDLE: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs['team-handle'] || '@sujithq-org/dependency-maintainers') }}
-  CUTOFF_DAYS: "${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs['cutoff-days'] || 75) }}"
+  ORG: ${{ github.event_name == 'workflow_dispatch' && inputs.org || 'sujithq' }}
+  TEAM_HANDLE: ${{ github.event_name == 'workflow_dispatch' && inputs['team-handle'] || '@sujithq-org/dependency-maintainers' }}
+  CUTOFF_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs['cutoff-days'] || 75 }}
 
 jobs:
   scan:
