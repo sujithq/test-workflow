@@ -13,19 +13,19 @@ jobs:
     
     steps:
     # Using outdated checkout action (v2 instead of v4)
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
       with:
         fetch-depth: 0
     
     # Using outdated setup-dotnet action (v1 instead of v4)
     - name: Setup .NET
-      uses: actions/setup-dotnet@v1
+      uses: actions/setup-dotnet@v5
       with:
         dotnet-version: 9.0.x
         
     # Using outdated cache action (v2 instead of v4)
     - name: Cache NuGet packages
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.nuget/packages
         key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
@@ -55,11 +55,11 @@ jobs:
     
     steps:
     # Using outdated checkout action (v2)
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
     
     # Using outdated setup-dotnet action (v1)
     - name: Setup .NET
-      uses: actions/setup-dotnet@v1
+      uses: actions/setup-dotnet@v5
       with:
         dotnet-version: 9.0.x
     
