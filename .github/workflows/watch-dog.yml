@@ -150,13 +150,14 @@ jobs:
 
             # Build the issue body safely into $body
             read -r -d '' body <<EOF || true
-${TEAM_HANDLE}
+            
+            ${TEAM_HANDLE}
 
-The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
+            The following repositories are nearing the ${CUTOFF_DAYS}-day Dependabot pause threshold:
 
-${{ steps.scan.outputs.warn_list }}
+            ${{ steps.scan.outputs.warn_list }}
 
-EOF
+            EOF
 
             # Look for an existing issue with the exact title in the current repo
             existing="$(gh issue list -R "$GITHUB_REPOSITORY" --search "$title in:title" --json number,title -q '.[] | select(.title=="'"$title"'") | .number' | head -n1 || true)"
